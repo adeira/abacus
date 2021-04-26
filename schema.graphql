@@ -1,0 +1,299 @@
+# @generated SignedSource<<a2fe2a6efebe0439fa4613bee56aadb3>>
+
+enum PriceSortDirection {
+  LOW_TO_HIGH
+  HIGH_TO_LOW
+}
+
+type POSQuery {
+  """
+    Lists published products for POS. Requires admin permissions so it should be used only in
+    POS after logging in.
+  """
+  listPublishedProducts: [Product]
+}
+
+input PosCheckoutProductInput {
+  productKey: ID!
+  productUnits: Int!
+  productPriceUnitAmount: Int!
+  productPriceUnitAmountCurrency: SupportedCurrency!
+}
+
+type DeauthorizePayload {
+  success: Boolean!
+}
+
+enum SupportedCurrency {
+  MXN
+}
+
+"Root mutation of the graph."
+type Mutation {
+  """
+    This function accepts Google ID token (after receiving it from Google Sign-In in a mobile
+    device) and returns authorization payload. There is no concept of sign-in and sign-up
+    because every user with a valid JWT ID token will be either authorized OR registered and
+    authorized. Invalid tokens and disabled tokens will be rejected.
+
+    Repeated calls will result in a new session token and deauthorization of the previous
+    token (if it exist). Original session token is returned back only once and cannot be
+    retrieved later (it's irreversibly hashed in the database).
+  """
+  authorizeMobile(googleIdToken: String!): AuthorizeMobilePayload!
+  """
+    Technically, this is very similar to `authorize_mobile` except the token handling is a bit
+    different. Firstly, the session expires after just a few hours (of inactivity). Secondly,
+    the session token should be securely stored somewhere in the browser.
+  """
+  authorizeWebapp(googleIdToken: String!): AuthorizeWebappPayload!
+  """
+    The purpose of this `deauthorize` mutation is to remove the active sessions and effectively
+    make the mobile application/webapp unsigned. Applications should remove the session token
+    once de-authorized.
+
+    Repeated calls will result in failure since it's not possible to deauthorize twice.
+  """
+  deauthorize(sessionToken: String!): DeauthorizePayload!
+  commerce: CommerceMutation!
+  pos: POSMutation!
+}
+
+type ProductMultilingualTranslations {
+  locale: SupportedLocale!
+  name: String!
+  description: String
+}
+
+type CommerceMutation {
+  productCreate(productMultilingualInput: ProductMultilingualInput!): ProductOrError!
+  productUpdate(productKey: ID!, productRevision: ID!, productMultilingualInput: ProductMultilingualInput!): ProductOrError!
+  productDelete(productKey: ID!): ProductOrError!
+  productPublish(productKey: ID!): ProductOrError!
+  productUnpublish(productKey: ID!): ProductOrError!
+}
+
+"""
+  Specifies additional visibility of the product. Each product is always visible in the backoffice
+  but can additionally be displayed in POS, eshop (public) or both.
+"""
+enum ProductMultilingualInputVisibility {
+  "Visible in eshop only (therefore it's public)." ESHOP
+  "Visible in POS only (accessible to authorized users)." POS
+}
+
+enum SupportedLocale {
+  en_US
+  es_MX
+}
+
+union PosCheckoutPayloadOrError = PosCheckoutPayload | PosCheckoutError
+
+"Root query of the graph."
+type Query {
+  "Returns information about the current user (can be authenticated or anonymous)."
+  whoami: WhoamiPayload!
+  listUsers: [AnyUser!]!
+  commerce: CommerceQuery!
+  pos: POSQuery!
+}
+
+type WhoamiPayload {
+  id: ID
+  """
+    Human readable type should be used only for testing purposes. The format is not guaranteed
+    and can change in the future completely.
+  """
+  humanReadableType: String
+}
+
+type POSMutation {
+  """
+    This is a simplified POS checkout. We simply record what the user bought for how much and
+    so on. There is almost no validation - what the client sends is what we record. This is the
+    main difference from eshop checkout where we would have to verify the prices for example.
+
+    Why not to verify that the checkout price matches the product price? It's because when
+    cashier accepts the money, the product is sold for the given price and there is not time for
+    price adjustments (customers would be angry if we would say "oh, actually it just got more
+    expensive").
+  """
+  checkout(input: PosCheckoutInput!): PosCheckoutPayloadOrError!
+}
+
+union ProductOrError = Product | ProductError
+
+""
+type AnyUser {
+  id: String!
+  type: String!
+}
+
+type ProductError {
+  message: String!
+}
+
+input ProductMultilingualInput {
+  images: [ProductImageUploadable!]!
+  price: ProductPriceInput!
+  translations: [ProductMultilingualInputTranslations!]!
+  visibility: [ProductMultilingualInputVisibility!]!
+}
+
+type CommerceQuery {
+  """
+    Searches all published (publicly accessible) products. Everyone can do it without any
+    special permission so it should be used on FE.
+  """
+  searchPublishedProducts(clientLocale: SupportedLocale!, priceSortDirection: PriceSortDirection!, searchTerm: String): [Product]
+  """
+    Searches all products (published and unpublished). Requires admin permissions so it should
+    be used only in backoffice to administer the products.
+  """
+  searchAllProducts(clientLocale: SupportedLocale!, priceSortDirection: PriceSortDirection!, searchTerm: String): [Product]
+  "Returns one publicly available product by its key. Anyone can call this resolver."
+  getPublishedProductByKey(clientLocale: SupportedLocale!, productKey: ID!): Product!
+  "Only admins can call this function! It returns published OR unpublished product by its key."
+  getUnpublishedProductByKey(clientLocale: SupportedLocale!, productKey: ID!): Product!
+}
+
+input ProductPriceInput {
+  """
+    The unit amount in centavo to be charged, represented as a whole integer.
+    Centavo equals ¹⁄₁₀₀ of the basic monetary unit.
+  """ unitAmount: Int!
+  "Three-letter [ISO currency code](https://www.iso.org/iso-4217-currency-codes.html)." unitAmountCurrency: SupportedCurrency!
+}
+
+"""
+
+        This type should be used together with GraphQL uploads and it should hold the file names
+        being uploaded. It's used together with the actual uploaded files for validation purposes.
+        Only files which are defined using this scalar will be processed.
+
+"""
+scalar ProductImageUploadable
+
+input ProductMultilingualInputTranslations {
+  locale: SupportedLocale!
+  name: String!
+  description: String
+}
+
+input PosCheckoutInput {
+  selectedProducts: [PosCheckoutProductInput!]!
+}
+
+type Product {
+  """
+    Product ID is unique in our whole GraphQL universe. Please note however, that it's not URL
+    friendly.
+  """
+  id: ID!
+  """
+    Product KEY is unique only amongst other products but can potentially conflict with other
+    keys of other types. Use product ID if you want truly unique value.
+  """
+  key: ID!
+  """
+    The read-only `revision` value should be used as a pre-condition for mutations, to avoid
+    "lost update" situations when editing the product. That is, if a client fetches a product
+    from the server, modifies it locally (but with the `revision` value untouched) and sends it
+    back to the server to update the product, but meanwhile the product was changed by another
+    operation, then the revisions do not match anymore and the operation is cancelled by the
+    server. Without this mechanism, the client would accidentally overwrite changes made
+    to the product without knowing about it.
+
+    When an existing product is updated or replaced successfully, our database will create a
+    new revision value. From a user perspective, there is just one single product revision
+    present per different `key` at every point in time. There is no built-in system to
+    automatically keep a history of all changes done to a product and old versions of a
+    product can not be restored via the `revision` value.
+
+    For more information see: https://www.arangodb.com/docs/stable/data-modeling-documents-document-address.html#document-revision
+  """
+  revision: ID!
+  "The product's name, meant to be displayable to the customer."
+  name: String!
+  """
+    The product's description, meant to be displayable to the customer. Use this field to
+    optionally store a long form explanation of the product being sold for your own rendering
+    purposes.
+  """
+  description: String
+  """
+    A list of images for this product, meant to be displayable to the customer. You can get
+    image cover via `imageCover` field.
+  """
+  images: [Image!]!
+  """
+    Returns the most important image which should be displayed as a product cover. Other images
+    are available under field `images`.
+  """
+  imageCover: Image
+  """
+    A label that represents units of this product in Stripe and on customers’ receipts and
+    invoices. When set, this will be included in associated invoice line item descriptions.
+  """
+  unitLabel: String!
+  price: ProductPrice!
+  isPublished: Boolean!
+  visibility: [ProductMultilingualInputVisibility!]!
+  """
+    Exposes all available product translations. What is the difference between `translations`
+    and `name`/`description`? Name and description are localized based on the eshop locale,
+    however, translations are all the available translations ignoring the locale.
+  """
+  translations: [ProductMultilingualTranslations!]!
+}
+
+type ProductPrice {
+  """
+    The unit amount in centavo to be charged, represented as a whole integer.
+    Centavo equals ¹⁄₁₀₀ of the basic monetary unit.
+  """
+  unitAmount: Int!
+  "Three-letter [ISO currency code](https://www.iso.org/iso-4217-currency-codes.html)."
+  unitAmountCurrency: SupportedCurrency!
+}
+
+type PosCheckoutError {
+  message: String!
+}
+
+type AuthorizeWebappPayload {
+  success: Boolean!
+  "Failure message is available only when success=false."
+  failureMessage: String
+  """
+    Session token should be send with every GraphQL request which requires auth.
+    Returns `None` if the request was not successful.
+  """
+  sessionToken: String
+}
+
+type PosCheckoutPayload {
+  id: ID!
+}
+
+type AuthorizeMobilePayload {
+  success: Boolean!
+  "Failure message is available only when success=false."
+  failureMessage: String
+  """
+    Session token should be send with every GraphQL request which requires auth.
+    Returns `None` if the request was not successful.
+  """
+  sessionToken: String
+}
+
+type Image {
+  name: String!
+  blurhash: String!
+  url: String!
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+}
